@@ -1,0 +1,85 @@
+import pandas as pd
+import numpy as np
+import ast
+import gradio as gr
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import pickle
+
+# Load the movie dataset
+credits = pd.read_csv('tmdb_5000_credits.csv')
+movies = pd.read_csv('tmdb_5000_movies.csv')
+
+# Merge datasets on the 'title' column
+movies = movies.merge(credits, left_on='title', right_on='title')
+
+# Select relevant columns
+movies = movies[['movie_id', 'title', 'overview', 'genres', 'keywords', 'cast', 'crew']]
+
+# Helper function to extract the 'name' field from JSON-like strings
+def convert(obj):
+    L = []
+    for i in ast.literal_eval(obj):
+        L.append(i['name'])
+    return L
+
+# Apply the 'convert' function to the relevant columns
+movies['genres'] = movies['genres'].apply(convert)
+movies['keywords'] = movies['keywords'].apply(convert)
+movies['cast'] = movies['cast'].apply(lambda x: [i['name'] for i in ast.literal_eval(x)[:3]])  # Only top 3 actors
+movies['crew'] = movies['crew'].apply(lambda x: [i['name'] for i in ast.literal_eval(x) if i['job'] == 'Director'])
+
+# Combine the relevant features into a 'tags' column
+movies['tags'] = movies['genres'] + movies['keywords'] + movies['cast'] + movies['crew']
+movies['tags'] = movies['tags'].apply(lambda x: " ".join(x))
+
+# Preprocess the 'tags' column to lowercase
+movies['tags'] = movies['tags'].apply(lambda x: x.lower())
+
+# Vectorization of the 'tags' column
+tfidf = TfidfVectorizer(stop_words='english')
+tfidf_matrix = tfidf.fit_transform(movies['tags'])
+
+# Compute cosine similarity matrix
+cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+# Recommendation function
+def get_recommendations(title, cosine_sim=cosine_sim):
+    # Case-insensitive matching
+    matched = movies[movies['title'].str.lower() == title.lower()]
+    if matched.empty:
+        return "Movie not found. Please try another title."
+
+    idx = matched.index[0]  # Find the index of the movie
+    sim_scores = list(enumerate(cosine_sim[idx]))  # Get cosine similarity scores
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)  # Sort by similarity
+    sim_scores = sim_scores[1:11]  # Get top 10 similar movies
+    movie_indices = [i[0] for i in sim_scores]  # Get movie indices
+
+    # Format output as a newline-separated string
+    recommended_titles = movies['title'].iloc[movie_indices].values
+    return "\n".join(recommended_titles)
+
+# Gradio interface function
+def recommend_movie(title):
+    return get_recommendations(title)
+
+# Create the Gradio interface
+iface = gr.Interface(
+    fn=recommend_movie,
+    inputs=gr.Textbox(label="Enter Movie Title"),
+    outputs=gr.Textbox(label="Recommended Movies"),
+    title="Movie Recommendation System",
+    description="Enter a movie title to get similar movie recommendations based on content."
+)
+
+# Launch the Gradio interface
+iface.launch(share=True)
+
+# Save processed data and similarity matrix for reuse
+with open('movie_data.pkl', 'wb') as file:
+    pickle.dump((movies, cosine_sim), file)
+
+# Optionally, also save the vectorizer and tfidf_matrix
+with open('vectorizer_data.pkl', 'wb') as file:
+    pickle.dump((tfidf, tfidf_matrix), file)
