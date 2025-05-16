@@ -83,3 +83,16 @@ with open('movie_data.pkl', 'wb') as file:
 # Optionally, also save the vectorizer and tfidf_matrix
 with open('vectorizer_data.pkl', 'wb') as file:
     pickle.dump((tfidf, tfidf_matrix), file)
+
+
+
+
+#Visualize a genre and movie 
+from collections import Counter
+
+genre_counts = Counter([genre for sublist in movies['genres'] for genre in sublist])
+plt.figure(figsize=(12, 6))
+plt.bar(genre_counts.keys(), genre_counts.values())
+plt.xticks(rotation=45)
+plt.title("Movie Genre Distribution")
+plt.show()
